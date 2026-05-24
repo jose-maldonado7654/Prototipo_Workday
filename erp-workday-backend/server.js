@@ -20,11 +20,35 @@ const talentRouter = require('./routes/talent');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Configuración de CORS para producción
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://erp-workday-frontend.onrender.com',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(cors({
+  origin: function(origin, callback) {
+    // Permitir requests sin origin (como mobile apps o curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 // Middleware de seguridad
-app.use(helmet());
-app.use(cors());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 app.use(express.json());
-app.use(morgan('dev'));
+app.use(morgan('combined')); // 'combined' es mejor para producción
 
 // Rate limiting
 const limiter = rateLimit({
@@ -74,7 +98,7 @@ app.use('/api/reports', reportsRouter);
 
 // Ruta 404 - No encontrada
 app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+  res.status(404).json({ error: 'Route not found', path: req.originalUrl });
 });
 
 // Manejador de errores global
@@ -85,7 +109,7 @@ app.use((err, req, res, next) => {
 
 // ==================== INICIAR SERVIDOR ====================
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 API disponible en http://localhost:${PORT}/api`);
   console.log(`✅ Módulos cargados:`);
