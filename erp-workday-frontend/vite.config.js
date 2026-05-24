@@ -17,12 +17,17 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     minify: 'terser',
+    // Elimina la configuración manualChunks que está causando el error
+    // O usa una función en su lugar:
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          icons: ['lucide-react'],
-          supabase: ['@supabase/supabase-js']
+        manualChunks: (id) => {
+          if (id.includes('node_modules')) {
+            if (id.includes('react')) return 'vendor-react'
+            if (id.includes('lucide-react')) return 'vendor-icons'
+            if (id.includes('@supabase')) return 'vendor-supabase'
+            return 'vendor'
+          }
         }
       }
     }
