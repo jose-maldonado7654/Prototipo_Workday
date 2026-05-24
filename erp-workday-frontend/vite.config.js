@@ -16,9 +16,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    minify: 'terser',
-    // Elimina la configuración manualChunks que está causando el error
-    // O usa una función en su lugar:
+    minify: 'esbuild', // Cambiado de 'terser' a 'esbuild' (viene con Vite)
     rollupOptions: {
       output: {
         manualChunks: (id) => {
