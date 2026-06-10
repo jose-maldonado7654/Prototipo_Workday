@@ -1,4 +1,4 @@
-// src/components/Dashboard/Dashboard.jsx
+// src/components/Dashboard/Dashboard.jsx (versión que consulta directamente)
 import React, { useState, useEffect } from 'react';
 import { Users, Calendar, DollarSign, TrendingUp, Building2, Target } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 
 const Dashboard = () => {
   const { employee } = useAuth();
-  const [headcountData, setHeadcountData] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [summary, setSummary] = useState({
     totalEmployees: 0,
     totalPlanned: 0,
@@ -28,22 +28,44 @@ const Dashboard = () => {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      // Obtener headcount con planificación
-      const { data: headcountData } = await supabase
-        .from('headcount_with_plan')
-        .select('*');
-      setHeadcountData(headcountData || []);
+      // 1. Obtener departamentos con su planificación
+      const { data: depts } = await supabase
+        .from('departments')
+        .select('id, name, planned_headcount');
       
-      // Calcular totales
-      const totalEmployees = headcountData?.reduce((sum, d) => sum + (d.active_count || 0), 0) || 0;
-      const totalPlanned = headcountData?.reduce((sum, d) => sum + (d.planned_count || 0), 0) || 0;
+      // 2. Obtener empleados por departamento
+      const { data: employees } = await supabase
+        .from('employees')
+        .select('id, department_id, status');
       
-      // Obtener solicitudes de ausencia pendientes
+      // 3. Procesar datos por departamento
+      const deptData = (depts || []).map(dept => {
+        const deptEmployees = (employees || []).filter(e => e.department_id === dept.id);
+        const activeCount = deptEmployees.filter(e => e.status === 'active').length;
+        const plannedCount = dept.planned_headcount || 0;
+        const percentage = plannedCount > 0 ? (activeCount / plannedCount) * 100 : 0;
+        
+        return {
+          department_id: dept.id,
+          department_name: dept.name,
+          active_count: activeCount,
+          planned_count: plannedCount,
+          percentage_of_plan: Math.round(percentage)
+        };
+      });
+      
+      setDepartments(deptData);
+      
+      // 4. Totales
+      const totalEmployees = deptData.reduce((sum, d) => sum + d.active_count, 0);
+      const totalPlanned = deptData.reduce((sum, d) => sum + d.planned_count, 0);
+      
+      // 5. Solicitudes pendientes
       const { data: leaveRequests } = await supabase
         .from('leave_requests')
         .select('id, status');
       
-      // Obtener gastos
+      // 6. Gastos
       const { data: expenses } = await supabase
         .from('expense_reports')
         .select('total_amount');
@@ -70,10 +92,10 @@ const Dashboard = () => {
   };
 
   const getStatusText = (percentage, active, planned) => {
-    if (percentage >= 100) return 'Completo - Vacante cerrada';
+    if (planned === 0) return 'Sin planificación';
+    if (percentage >= 100) return 'Completo';
     if (percentage >= 80) return 'Casi completo';
     if (percentage >= 50) return 'En buen camino';
-    if (planned === 0) return 'Sin planificación';
     return 'Necesita contratación';
   };
 
@@ -153,8 +175,8 @@ const Dashboard = () => {
         </div>
         
         <div className="space-y-6">
-          {headcountData.map((dept) => {
-            const percentage = dept.percentage_of_plan || 0;
+          {departments.map((dept) => {
+            const percentage = dept.percentage_of_plan;
             const barColor = getBarColor(percentage);
             const statusText = getStatusText(percentage, dept.active_count, dept.planned_count);
             
@@ -174,26 +196,36 @@ const Dashboard = () => {
                     <p className="text-xs text-text-tertiary">{statusText}</p>
                   </div>
                 </div>
-                <div className="w-full bg-surface-700 rounded-full h-2.5">
-                  <div
-                    className={`${barColor} h-2.5 rounded-full transition-all duration-500`}
-                    style={{ width: `${Math.min(percentage, 100)}%` }}
-                  />
-                </div>
+                {dept.planned_count > 0 ? (
+                  <div className="w-full bg-surface-700 rounded-full h-2.5">
+                    <div
+                      className={`${barColor} h-2.5 rounded-full transition-all duration-500`}
+                      style={{ width: `${Math.min(percentage, 100)}%` }}
+                    />
+                  </div>
+                ) : (
+                  <div className="w-full bg-surface-700 rounded-full h-2.5">
+                    <div className="bg-surface-500 h-2.5 rounded-full w-0"></div>
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
         
         <div className="mt-6 pt-4 border-t border-white/10">
-          <div className="flex items-center gap-4 text-xs">
+          <div className="flex flex-wrap items-center gap-4 text-xs">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+              <span className="text-text-tertiary">&lt; 50%</span>
+            </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-              <span className="text-text-tertiary">≥ 50%</span>
+              <span className="text-text-tertiary">50% - 79%</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-              <span className="text-text-tertiary">≥ 80%</span>
+              <span className="text-text-tertiary">80% - 99%</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-red-500 rounded-full"></div>
