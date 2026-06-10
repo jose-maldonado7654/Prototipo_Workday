@@ -1,6 +1,6 @@
 // src/components/SelfService/SelfService.jsx
 import React, { useState, useEffect } from 'react';
-import { User, Phone, MapPin, Calendar, FileText, Edit2, Save, X, CheckCircle, Clock, Award } from 'lucide-react';
+import { User, Phone, MapPin, Calendar, FileText, Edit2, Save, X, CheckCircle, Clock, Award, Mail, Briefcase, Building2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 
@@ -8,7 +8,9 @@ const SelfService = () => {
   const { employee: authEmployee } = useAuth();
   const [profile, setProfile] = useState(null);
   const [documents, setDocuments] = useState([]);
-  const [summary, setSummary] = useState(null);
+  const [leaveBalance, setLeaveBalance] = useState([]);
+  const [recentRequests, setRecentRequests] = useState([]);
+  const [upcomingTasks, setUpcomingTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -21,7 +23,9 @@ const SelfService = () => {
     if (authEmployee?.id) {
       fetchProfile();
       fetchDocuments();
-      fetchSummary();
+      fetchLeaveBalance();
+      fetchRecentRequests();
+      fetchUpcomingTasks();
     } else {
       setLoading(false);
     }
@@ -63,37 +67,54 @@ const SelfService = () => {
     }
   };
 
-  const fetchSummary = async () => {
+  const fetchLeaveBalance = async () => {
     if (!authEmployee?.id) return;
 
     try {
-      const [leaveBalance, pendingRequests, upcomingTasks] = await Promise.all([
-        supabase
-          .from('leave_balances')
-          .select('*, policy:leave_policies(name, days_per_year)')
-          .eq('employee_id', authEmployee.id)
-          .eq('year', new Date().getFullYear()),
-        supabase
-          .from('leave_requests')
-          .select('*')
-          .eq('employee_id', authEmployee.id)
-          .eq('status', 'pending'),
-        supabase
-          .from('onboarding_tasks')
-          .select('*')
-          .eq('employee_id', authEmployee.id)
-          .eq('completed', false)
-          .order('due_date', { ascending: true })
-          .limit(5)
-      ]);
+      const { data } = await supabase
+        .from('leave_balances')
+        .select('*, policy:leave_policies(name, days_per_year)')
+        .eq('employee_id', authEmployee.id)
+        .eq('year', new Date().getFullYear());
       
-      setSummary({
-        leaveBalance: leaveBalance.data || [],
-        pendingRequests: pendingRequests.data || [],
-        upcomingTasks: upcomingTasks.data || []
-      });
+      setLeaveBalance(data || []);
     } catch (error) {
-      console.error('Error fetching summary:', error);
+      console.error('Error fetching leave balance:', error);
+    }
+  };
+
+  const fetchRecentRequests = async () => {
+    if (!authEmployee?.id) return;
+
+    try {
+      const { data } = await supabase
+        .from('leave_requests')
+        .select('*, policy:leave_policies(name)')
+        .eq('employee_id', authEmployee.id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+      
+      setRecentRequests(data || []);
+    } catch (error) {
+      console.error('Error fetching recent requests:', error);
+    }
+  };
+
+  const fetchUpcomingTasks = async () => {
+    if (!authEmployee?.id) return;
+
+    try {
+      const { data } = await supabase
+        .from('onboarding_tasks')
+        .select('*')
+        .eq('employee_id', authEmployee.id)
+        .eq('completed', false)
+        .order('due_date', { ascending: true })
+        .limit(5);
+      
+      setUpcomingTasks(data || []);
+    } catch (error) {
+      console.error('Error fetching upcoming tasks:', error);
     } finally {
       setLoading(false);
     }
@@ -103,30 +124,46 @@ const SelfService = () => {
     if (!authEmployee?.id) return;
 
     try {
-      await supabase
+      const { error } = await supabase
         .from('employees')
         .update({
           phone: editForm.phone,
           address: editForm.address,
-          birth_date: editForm.birth_date
+          birth_date: editForm.birth_date || null
         })
         .eq('id', authEmployee.id);
+      
+      if (error) throw error;
       
       setEditing(false);
       fetchProfile();
     } catch (error) {
       console.error('Error updating profile:', error);
+      alert('Error al actualizar el perfil');
     }
   };
 
   const getDocumentTypeLabel = (type) => {
     const types = {
-      contract: 'Contrato Laboral',
-      id_copy: 'Cédula/Identificación',
-      degree: 'Título Profesional',
-      photo: 'Foto'
+      contract: '📄 Contrato Laboral',
+      id_copy: '🆔 Documento de Identidad',
+      degree: '🎓 Título Profesional',
+      photo: '📸 Fotografía',
+      bank_account: '🏦 Datos Bancarios',
+      medical: '🏥 Examen Médico'
     };
     return types[type] || type;
+  };
+
+  const getStatusBadge = (status) => {
+    switch (status) {
+      case 'approved':
+        return { color: 'text-accent-400 bg-accent-600/20', icon: CheckCircle, label: 'Aprobada' };
+      case 'rejected':
+        return { color: 'text-red-400 bg-red-600/20', icon: XCircle, label: 'Rechazada' };
+      default:
+        return { color: 'text-yellow-400 bg-yellow-600/20', icon: Clock, label: 'Pendiente' };
+    }
   };
 
   // Estado de carga inicial
@@ -160,13 +197,37 @@ const SelfService = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Columna Izquierda - Perfil */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Perfil Personal */}
+          {/* Tarjeta de bienvenida */}
+          <div className="bg-gradient-to-r from-primary-600/20 to-primary-800/20 rounded-xl border border-primary-500/30 p-6">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 bg-primary-600 rounded-full flex items-center justify-center shadow-lg">
+                <span className="text-white font-bold text-2xl">
+                  {profile?.first_name?.[0]}{profile?.last_name?.[0]}
+                </span>
+              </div>
+              <div>
+                <h2 className="text-2xl font-display font-bold text-white">
+                  {profile?.first_name} {profile?.last_name}
+                </h2>
+                <div className="flex items-center gap-2 mt-1">
+                  <Mail className="w-4 h-4 text-text-tertiary" />
+                  <span className="text-text-secondary">{profile?.email}</span>
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <Briefcase className="w-4 h-4 text-text-tertiary" />
+                  <span className="text-text-secondary">{profile?.position?.title || 'Sin cargo asignado'}</span>
+                  <Building2 className="w-4 h-4 text-text-tertiary ml-2" />
+                  <span className="text-text-secondary">{profile?.department?.name || 'Sin departamento'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Información Personal - Editable */}
           <div className="bg-surface-800 rounded-xl border border-white/10 overflow-hidden">
             <div className="p-6 border-b border-white/10 flex justify-between items-center">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-primary-600/10 rounded-lg">
-                  <User className="w-5 h-5 text-primary-400" />
-                </div>
+                <User className="w-5 h-5 text-primary-400" />
                 <h2 className="text-lg font-display font-semibold text-white">Información Personal</h2>
               </div>
               {!editing ? (
@@ -194,35 +255,28 @@ const SelfService = () => {
                 </div>
               )}
             </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-text-tertiary text-sm">Nombre</label>
-                  <p className="text-white font-medium">{profile?.first_name} {profile?.last_name}</p>
+                  <label className="text-text-tertiary text-sm">Nombre completo</label>
+                  <p className="text-text-primary font-medium">{profile?.first_name} {profile?.last_name}</p>
                 </div>
                 <div>
-                  <label className="text-text-tertiary text-sm">Email</label>
-                  <p className="text-white font-medium">{profile?.email}</p>
-                </div>
-                <div>
-                  <label className="text-text-tertiary text-sm">Departamento</label>
-                  <p className="text-white font-medium">{profile?.department?.name || 'Sin asignar'}</p>
-                </div>
-                <div>
-                  <label className="text-text-tertiary text-sm">Cargo</label>
-                  <p className="text-white font-medium">{profile?.position?.title || 'Sin asignar'}</p>
+                  <label className="text-text-tertiary text-sm">Correo electrónico</label>
+                  <p className="text-text-primary font-medium">{profile?.email}</p>
                 </div>
                 <div>
                   <label className="text-text-tertiary text-sm">Teléfono</label>
                   {editing ? (
                     <input
-                      type="text"
+                      type="tel"
                       className="input mt-1"
                       value={editForm.phone}
                       onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                      placeholder="+1234567890"
                     />
                   ) : (
-                    <p className="text-white font-medium">{profile?.phone || 'No registrado'}</p>
+                    <p className="text-text-primary font-medium">{profile?.phone || 'No registrado'}</p>
                   )}
                 </div>
                 <div>
@@ -235,12 +289,12 @@ const SelfService = () => {
                       onChange={(e) => setEditForm({ ...editForm, birth_date: e.target.value })}
                     />
                   ) : (
-                    <p className="text-white font-medium">
+                    <p className="text-text-primary font-medium">
                       {profile?.birth_date ? new Date(profile.birth_date).toLocaleDateString() : 'No registrado'}
                     </p>
                   )}
                 </div>
-                <div className="col-span-2">
+                <div className="md:col-span-2">
                   <label className="text-text-tertiary text-sm">Dirección</label>
                   {editing ? (
                     <textarea
@@ -248,9 +302,10 @@ const SelfService = () => {
                       rows="2"
                       value={editForm.address}
                       onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
+                      placeholder="Calle, número, ciudad, código postal"
                     />
                   ) : (
-                    <p className="text-white font-medium">{profile?.address || 'No registrada'}</p>
+                    <p className="text-text-primary font-medium">{profile?.address || 'No registrada'}</p>
                   )}
                 </div>
               </div>
@@ -261,20 +316,22 @@ const SelfService = () => {
           <div className="bg-surface-800 rounded-xl border border-white/10 overflow-hidden">
             <div className="p-6 border-b border-white/10">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-primary-600/10 rounded-lg">
-                  <FileText className="w-5 h-5 text-primary-400" />
-                </div>
+                <FileText className="w-5 h-5 text-primary-400" />
                 <h2 className="text-lg font-display font-semibold text-white">Mis Documentos</h2>
               </div>
             </div>
             <div className="divide-y divide-white/10">
               {documents.map((doc) => (
-                <div key={doc.id} className="p-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-white">{getDocumentTypeLabel(doc.document_type)}</p>
-                    <p className="text-xs text-text-tertiary">
-                      Subido: {new Date(doc.uploaded_at).toLocaleDateString()}
-                    </p>
+                <div key={doc.id} className="p-4 flex items-center justify-between hover:bg-surface-700/30 transition">
+                  <div className="flex items-center gap-3">
+                    <FileText className="w-5 h-5 text-primary-400" />
+                    <div>
+                      <p className="text-white">{getDocumentTypeLabel(doc.document_type)}</p>
+                      <p className="text-xs text-text-tertiary">
+                        Subido: {new Date(doc.uploaded_at).toLocaleDateString()}
+                        {doc.verified && ' • Verificado ✅'}
+                      </p>
+                    </div>
                   </div>
                   <a
                     href={doc.document_url}
@@ -290,6 +347,7 @@ const SelfService = () => {
                 <div className="p-8 text-center">
                   <FileText className="w-12 h-12 text-surface-600 mx-auto mb-3" />
                   <p className="text-text-tertiary">No hay documentos subidos</p>
+                  <p className="text-xs text-text-tertiary mt-1">Contacta a RH para subir tu documentación</p>
                 </div>
               )}
             </div>
@@ -300,63 +358,71 @@ const SelfService = () => {
         <div className="space-y-6">
           {/* Saldo de Vacaciones */}
           <div className="bg-surface-800 rounded-xl border border-white/10 p-6">
-            <h3 className="font-display font-semibold text-white mb-4">Saldo de Vacaciones</h3>
-            <div className="space-y-3">
-              {summary?.leaveBalance?.map((balance) => (
-                <div key={balance.id}>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-text-secondary">{balance.policy?.name}</span>
-                    <span className="text-text-primary font-medium">{balance.remaining_days} días</span>
+            <h3 className="font-display font-semibold text-white mb-4">📅 Días Disponibles</h3>
+            <div className="space-y-4">
+              {leaveBalance.map((balance) => {
+                const percentage = (balance.used_days / balance.total_days) * 100;
+                return (
+                  <div key={balance.id}>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="text-text-secondary">{balance.policy?.name}</span>
+                      <span className="text-text-primary font-medium">{balance.remaining_days} / {balance.total_days} días</span>
+                    </div>
+                    <div className="w-full bg-surface-700 rounded-full h-2">
+                      <div
+                        className="bg-primary-500 h-2 rounded-full transition-all"
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-text-tertiary mt-1">
+                      Usados: {balance.used_days} días
+                    </p>
                   </div>
-                  <div className="w-full bg-surface-700 rounded-full h-2">
-                    <div
-                      className="bg-primary-500 h-2 rounded-full"
-                      style={{ width: `${(balance.used_days / balance.total_days) * 100}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-text-tertiary mt-1">
-                    {balance.used_days} de {balance.total_days} días usados
-                  </p>
-                </div>
-              ))}
-              {summary?.leaveBalance?.length === 0 && (
+                );
+              })}
+              {leaveBalance.length === 0 && (
                 <p className="text-text-tertiary text-center py-4">No hay información de saldo</p>
               )}
             </div>
           </div>
 
-          {/* Solicitudes Pendientes */}
+          {/* Solicitudes Recientes */}
           <div className="bg-surface-800 rounded-xl border border-white/10 p-6">
-            <h3 className="font-display font-semibold text-white mb-4">Solicitudes Pendientes</h3>
+            <h3 className="font-display font-semibold text-white mb-4">📋 Solicitudes Recientes</h3>
             <div className="space-y-3">
-              {summary?.pendingRequests?.map((request) => (
-                <div key={request.id} className="flex items-center gap-3">
-                  <Clock className="w-4 h-4 text-yellow-400" />
-                  <div>
-                    <p className="text-white text-sm">Solicitud de ausencia</p>
-                    <p className="text-xs text-text-tertiary">
-                      {new Date(request.start_date).toLocaleDateString()} - {new Date(request.end_date).toLocaleDateString()}
-                    </p>
+              {recentRequests.map((request) => {
+                const statusConfig = getStatusBadge(request.status);
+                const StatusIcon = statusConfig.icon;
+                return (
+                  <div key={request.id} className="flex items-center gap-3 p-2 bg-surface-700/30 rounded-lg">
+                    <Calendar className="w-4 h-4 text-primary-400" />
+                    <div className="flex-1">
+                      <p className="text-white text-sm">{request.policy?.name}</p>
+                      <p className="text-xs text-text-tertiary">
+                        {new Date(request.start_date).toLocaleDateString()} - {new Date(request.end_date).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${statusConfig.color}`}>
+                      <StatusIcon className="w-3 h-3" />
+                      {statusConfig.label}
+                    </span>
                   </div>
-                </div>
-              ))}
-              {summary?.pendingRequests?.length === 0 && (
-                <div className="flex items-center gap-3">
-                  <CheckCircle className="w-4 h-4 text-accent-400" />
-                  <p className="text-text-tertiary text-sm">No hay solicitudes pendientes</p>
-                </div>
+                );
+              })}
+              {recentRequests.length === 0 && (
+                <p className="text-text-tertiary text-center py-4">No hay solicitudes recientes</p>
               )}
             </div>
           </div>
 
           {/* Tareas Pendientes */}
           <div className="bg-surface-800 rounded-xl border border-white/10 p-6">
-            <h3 className="font-display font-semibold text-white mb-4">Tareas Pendientes</h3>
+            <h3 className="font-display font-semibold text-white mb-4">✅ Tareas Pendientes</h3>
             <div className="space-y-3">
-              {summary?.upcomingTasks?.map((task) => (
-                <div key={task.id} className="flex items-center gap-3">
+              {upcomingTasks.map((task) => (
+                <div key={task.id} className="flex items-center gap-3 p-2 bg-surface-700/30 rounded-lg">
                   <div className="w-2 h-2 bg-primary-400 rounded-full"></div>
-                  <div>
+                  <div className="flex-1">
                     <p className="text-white text-sm">{task.task_name}</p>
                     <p className="text-xs text-text-tertiary">
                       {task.due_date ? `Vence: ${new Date(task.due_date).toLocaleDateString()}` : 'Sin fecha límite'}
@@ -364,8 +430,8 @@ const SelfService = () => {
                   </div>
                 </div>
               ))}
-              {summary?.upcomingTasks?.length === 0 && (
-                <div className="flex items-center gap-3">
+              {upcomingTasks.length === 0 && (
+                <div className="flex items-center gap-3 p-2">
                   <CheckCircle className="w-4 h-4 text-accent-400" />
                   <p className="text-text-tertiary text-sm">No hay tareas pendientes</p>
                 </div>
