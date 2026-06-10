@@ -7,7 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 const Reports = () => {
   const { employee, isAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [departments, setDepartments] = useState([]);
+  const [headcountData, setHeadcountData] = useState([]);
   const [leaveStats, setLeaveStats] = useState([]);
   const [expenseStats, setExpenseStats] = useState([]);
   const [recentHires, setRecentHires] = useState([]);
@@ -28,27 +28,29 @@ const Reports = () => {
   const fetchAllData = async () => {
     setLoading(true);
     try {
-      // 1. Obtener departamentos con planificación
+      // =====================================================
+      // 1. HEADCOUNT CON PLANIFICACIÓN
+      // =====================================================
       const { data: depts } = await supabase
         .from('departments')
         .select('id, name, planned_headcount');
       
-      // 2. Obtener empleados por departamento
       const { data: employees } = await supabase
         .from('employees')
         .select('id, department_id, status, hire_date, first_name, last_name');
       
-      // 3. Procesar headcount por departamento
       const deptData = (depts || []).map(dept => {
         const deptEmployees = (employees || []).filter(e => e.department_id === dept.id);
         const activeCount = deptEmployees.filter(e => e.status === 'active').length;
         const plannedCount = dept.planned_headcount || 0;
         const percentage = plannedCount > 0 ? (activeCount / plannedCount) * 100 : 0;
         
-        // Determinar color según porcentaje
         let statusColor = 'text-yellow-400';
         let statusText = 'Por debajo de meta';
-        if (percentage >= 100) {
+        if (plannedCount === 0) {
+          statusColor = 'text-gray-400';
+          statusText = 'Sin planificación';
+        } else if (percentage >= 100) {
           statusColor = 'text-red-400';
           statusText = 'Completo / Excede meta';
         } else if (percentage >= 80) {
@@ -57,9 +59,6 @@ const Reports = () => {
         } else if (percentage >= 50) {
           statusColor = 'text-blue-400';
           statusText = 'En progreso';
-        } else if (plannedCount === 0) {
-          statusColor = 'text-gray-400';
-          statusText = 'Sin planificación';
         }
         
         return {
@@ -72,51 +71,77 @@ const Reports = () => {
           status_text: statusText
         };
       });
+      setHeadcountData(deptData);
       
-      setDepartments(deptData);
+      // =====================================================
+      // 2. AUSENCIAS (usando la vista existente)
+      // =====================================================
+      const { data: leaveViewData } = await supabase
+        .from('leave_summary_by_department')
+        .select('*');
       
-      // 4. Estadísticas de ausencias por departamento
-      const { data: leaveData } = await supabase
-        .from('leave_requests')
-        .select('*, employee:employees(department_id)');
+      if (leaveViewData && leaveViewData.length > 0) {
+        setLeaveStats(leaveViewData);
+      } else {
+        // Si la vista no tiene datos, calcular manualmente
+        const { data: leaveRequests } = await supabase
+          .from('leave_requests')
+          .select('*, employee:employees(department_id), start_date, end_date, status');
+        
+        const leaveByDept = (depts || []).map(dept => {
+          const deptLeaves = (leaveRequests || []).filter(l => l.employee?.department_id === dept.id);
+          return {
+            department_name: dept.name,
+            total_requests: deptLeaves.length,
+            pending_requests: deptLeaves.filter(l => l.status === 'pending').length,
+            approved_requests: deptLeaves.filter(l => l.status === 'approved').length,
+            rejected_requests: deptLeaves.filter(l => l.status === 'rejected').length,
+            total_days_taken: deptLeaves.reduce((sum, l) => {
+              if (l.status === 'approved') {
+                const days = Math.ceil((new Date(l.end_date) - new Date(l.start_date)) / (1000 * 60 * 60 * 24)) + 1;
+                return sum + (days > 0 ? days : 0);
+              }
+              return sum;
+            }, 0)
+          };
+        });
+        setLeaveStats(leaveByDept);
+      }
       
-      const leaveByDept = (depts || []).map(dept => {
-        const deptLeaves = (leaveData || []).filter(l => l.employee?.department_id === dept.id);
-        return {
-          department_name: dept.name,
-          total_requests: deptLeaves.length,
-          pending_requests: deptLeaves.filter(l => l.status === 'pending').length,
-          approved_requests: deptLeaves.filter(l => l.status === 'approved').length,
-          rejected_requests: deptLeaves.filter(l => l.status === 'rejected').length,
-          total_days_taken: deptLeaves.reduce((sum, l) => {
-            const days = Math.ceil((new Date(l.end_date) - new Date(l.start_date)) / (1000 * 60 * 60 * 24)) + 1;
-            return sum + (days > 0 ? days : 0);
-          }, 0)
-        };
-      });
-      setLeaveStats(leaveByDept);
+      // =====================================================
+      // 3. GASTOS (usando la vista existente)
+      // =====================================================
+      const { data: expenseViewData } = await supabase
+        .from('expenses_by_department')
+        .select('*');
       
-      // 5. Gastos por departamento
-      const { data: expenseData } = await supabase
-        .from('expense_reports')
-        .select('*, employee:employees(department_id), total_amount');
+      if (expenseViewData && expenseViewData.length > 0) {
+        setExpenseStats(expenseViewData);
+      } else {
+        // Si la vista no tiene datos, calcular manualmente
+        const { data: expenses } = await supabase
+          .from('expense_reports')
+          .select('*, employee:employees(department_id), total_amount, status');
+        
+        const expenseByDept = (depts || []).map(dept => {
+          const deptExpenses = (expenses || []).filter(e => e.employee?.department_id === dept.id);
+          const totalAmount = deptExpenses.reduce((sum, e) => sum + (e.total_amount || 0), 0);
+          return {
+            department_name: dept.name,
+            total_reports: deptExpenses.length,
+            total_amount: totalAmount,
+            average_amount: deptExpenses.length > 0 ? totalAmount / deptExpenses.length : 0,
+            approved_reports: deptExpenses.filter(e => e.status === 'approved').length,
+            pending_reports: deptExpenses.filter(e => e.status === 'submitted').length,
+            rejected_reports: deptExpenses.filter(e => e.status === 'rejected').length
+          };
+        });
+        setExpenseStats(expenseByDept);
+      }
       
-      const expenseByDept = (depts || []).map(dept => {
-        const deptExpenses = (expenseData || []).filter(e => e.employee?.department_id === dept.id);
-        const totalAmount = deptExpenses.reduce((sum, e) => sum + (e.total_amount || 0), 0);
-        return {
-          department_name: dept.name,
-          total_reports: deptExpenses.length,
-          total_amount: totalAmount,
-          average_amount: deptExpenses.length > 0 ? totalAmount / deptExpenses.length : 0,
-          approved_reports: deptExpenses.filter(e => e.status === 'approved').length,
-          pending_reports: deptExpenses.filter(e => e.status === 'submitted').length,
-          rejected_reports: deptExpenses.filter(e => e.status === 'rejected').length
-        };
-      });
-      setExpenseStats(expenseByDept);
-      
-      // 6. Contrataciones recientes
+      // =====================================================
+      // 4. CONTRATACIONES RECIENTES
+      // =====================================================
       const recentHiresList = (employees || [])
         .filter(e => e.hire_date)
         .sort((a, b) => new Date(b.hire_date) - new Date(a.hire_date))
@@ -129,7 +154,9 @@ const Reports = () => {
         }));
       setRecentHires(recentHiresList);
       
-      // 7. Resumen general
+      // =====================================================
+      // 5. RESUMEN GENERAL
+      // =====================================================
       const activeEmployees = (employees || []).filter(e => e.status === 'active').length;
       const totalPlanned = depts.reduce((sum, d) => sum + (d.planned_headcount || 0), 0);
       
@@ -147,7 +174,7 @@ const Reports = () => {
         .is('effective_to', null);
       
       setSummary({
-        totalEmployees: activeEmployees,
+        totalEmployees: (employees || []).length,
         totalPlanned: totalPlanned,
         activeEmployees: activeEmployees,
         totalLeaveRequests: leaveRequests?.length || 0,
@@ -196,20 +223,20 @@ const Reports = () => {
       {/* Tarjetas de Resumen */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-surface-800 rounded-xl border border-white/10 p-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3 mb-4">
             <div className="p-2 bg-primary-600/10 rounded-lg">
               <Users className="w-5 h-5 text-primary-400" />
             </div>
           </div>
-          <p className="text-text-tertiary text-sm mb-1">Empleados Activos</p>
-          <p className="text-2xl font-bold text-white">{summary.activeEmployees}</p>
+          <p className="text-text-tertiary text-sm mb-1">Total Empleados</p>
+          <p className="text-2xl font-bold text-white">{summary.totalEmployees}</p>
           <p className="text-xs text-text-tertiary mt-2">
-            Meta: {summary.totalPlanned} empleados
+            {summary.activeEmployees} activos
           </p>
         </div>
 
         <div className="bg-surface-800 rounded-xl border border-white/10 p-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3 mb-4">
             <div className="p-2 bg-yellow-600/10 rounded-lg">
               <Calendar className="w-5 h-5 text-yellow-400" />
             </div>
@@ -222,7 +249,7 @@ const Reports = () => {
         </div>
 
         <div className="bg-surface-800 rounded-xl border border-white/10 p-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3 mb-4">
             <div className="p-2 bg-green-600/10 rounded-lg">
               <DollarSign className="w-5 h-5 text-green-400" />
             </div>
@@ -232,7 +259,7 @@ const Reports = () => {
         </div>
 
         <div className="bg-surface-800 rounded-xl border border-white/10 p-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3 mb-4">
             <div className="p-2 bg-accent-600/10 rounded-lg">
               <TrendingUp className="w-5 h-5 text-accent-400" />
             </div>
@@ -243,67 +270,43 @@ const Reports = () => {
       </div>
 
       {/* Headcount por Departamento con Planificación */}
-      <div className="bg-surface-800 rounded-xl border border-white/10 overflow-hidden">
-        <div className="p-6 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <Building2 className="w-5 h-5 text-primary-400" />
-            <h2 className="text-lg font-display font-semibold text-white">Planificación por Departamento</h2>
-          </div>
-          <p className="text-text-tertiary text-sm mt-1">Comparativa entre empleados actuales y meta planificada</p>
+      <div className="bg-surface-800 rounded-xl border border-white/10 p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <Building2 className="w-5 h-5 text-primary-400" />
+          <h2 className="text-lg font-display font-semibold text-white">Planificación por Departamento</h2>
         </div>
-        <div className="p-6">
-          <div className="space-y-5">
-            {departments.map((dept) => (
-              <div key={dept.id}>
-                <div className="flex justify-between items-center mb-2 flex-wrap gap-2">
-                  <div>
-                    <span className="font-medium text-text-primary">{dept.name}</span>
-                    <span className="text-sm text-text-tertiary ml-2">
-                      {dept.active_count} / {dept.planned_count} empleados
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className={`text-sm font-medium ${dept.status_color}`}>
-                      {dept.percentage}% 
-                    </span>
-                    <p className="text-xs text-text-tertiary">{dept.status_text}</p>
-                  </div>
+        
+        <div className="space-y-5">
+          {headcountData.map((dept) => (
+            <div key={dept.id}>
+              <div className="flex justify-between items-center mb-2 flex-wrap gap-2">
+                <div>
+                  <span className="font-medium text-text-primary">{dept.name}</span>
+                  <span className="text-sm text-text-tertiary ml-2">
+                    {dept.active_count} / {dept.planned_count} empleados
+                  </span>
                 </div>
-                {dept.planned_count > 0 ? (
-                  <div className="w-full bg-surface-700 rounded-full h-2.5">
-                    <div
-                      className={`${getBarColor(dept.percentage)} h-2.5 rounded-full transition-all duration-500`}
-                      style={{ width: `${Math.min(dept.percentage, 100)}%` }}
-                    />
-                  </div>
-                ) : (
-                  <div className="w-full bg-surface-700 rounded-full h-2.5">
-                    <div className="bg-surface-500 h-2.5 rounded-full w-0"></div>
-                  </div>
-                )}
+                <div className="text-right">
+                  <span className={`text-sm font-medium ${dept.status_color}`}>
+                    {dept.percentage}% 
+                  </span>
+                  <p className="text-xs text-text-tertiary">{dept.status_text}</p>
+                </div>
               </div>
-            ))}
-          </div>
-          <div className="mt-6 pt-4 border-t border-white/10">
-            <div className="flex flex-wrap items-center gap-4 text-xs">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-                <span className="text-text-tertiary">&lt; 50% - Por debajo de meta</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                <span className="text-text-tertiary">50% - 79% - En progreso</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                <span className="text-text-tertiary">80% - 99% - Cerca de meta</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                <span className="text-text-tertiary">100%+ - Completo / Excede</span>
-              </div>
+              {dept.planned_count > 0 ? (
+                <div className="w-full bg-surface-700 rounded-full h-2.5">
+                  <div
+                    className={`${getBarColor(dept.percentage)} h-2.5 rounded-full transition-all duration-500`}
+                    style={{ width: `${Math.min(dept.percentage, 100)}%` }}
+                  />
+                </div>
+              ) : (
+                <div className="w-full bg-surface-700 rounded-full h-2.5">
+                  <div className="bg-surface-500 h-2.5 rounded-full w-0"></div>
+                </div>
+              )}
             </div>
-          </div>
+          ))}
         </div>
       </div>
 
@@ -331,13 +334,20 @@ const Reports = () => {
               {leaveStats.map((dept, index) => (
                 <tr key={index} className="hover:bg-surface-700/30 transition">
                   <td className="table-cell font-medium text-white">{dept.department_name}</td>
-                  <td className="table-cell">{dept.total_requests}</td>
-                  <td className="table-cell text-accent-400">{dept.approved_requests}</td>
-                  <td className="table-cell text-yellow-400">{dept.pending_requests}</td>
-                  <td className="table-cell text-red-400">{dept.rejected_requests}</td>
-                  <td className="table-cell">{dept.total_days_taken}</td>
+                  <td className="table-cell">{dept.total_requests || 0}</td>
+                  <td className="table-cell text-accent-400">{dept.approved_requests || 0}</td>
+                  <td className="table-cell text-yellow-400">{dept.pending_requests || 0}</td>
+                  <td className="table-cell text-red-400">{dept.rejected_requests || 0}</td>
+                  <td className="table-cell">{dept.total_days_taken || 0}</td>
                 </tr>
               ))}
+              {leaveStats.length === 0 && (
+                <tr>
+                  <td colSpan="6" className="text-center py-8 text-text-tertiary">
+                    No hay datos de ausencias
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -367,13 +377,20 @@ const Reports = () => {
               {expenseStats.map((dept, index) => (
                 <tr key={index} className="hover:bg-surface-700/30 transition">
                   <td className="table-cell font-medium text-white">{dept.department_name}</td>
-                  <td className="table-cell">{dept.total_reports}</td>
+                  <td className="table-cell">{dept.total_reports || 0}</td>
                   <td className="table-cell text-white font-medium">${(dept.total_amount || 0).toLocaleString()}</td>
                   <td className="table-cell">${Math.round(dept.average_amount || 0).toLocaleString()}</td>
-                  <td className="table-cell text-accent-400">{dept.approved_reports}</td>
-                  <td className="table-cell text-yellow-400">{dept.pending_reports}</td>
+                  <td className="table-cell text-accent-400">{dept.approved_reports || 0}</td>
+                  <td className="table-cell text-yellow-400">{dept.pending_reports || 0}</td>
                 </tr>
               ))}
+              {expenseStats.length === 0 && (
+                <tr>
+                  <td colSpan="6" className="text-center py-8 text-text-tertiary">
+                    No hay datos de gastos
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
