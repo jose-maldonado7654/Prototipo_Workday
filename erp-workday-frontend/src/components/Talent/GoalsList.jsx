@@ -35,19 +35,23 @@ const GoalsList = () => {
   }, [isAdmin, employee]);
 
   useEffect(() => {
-    if (isAdmin && viewingEmployeeId) {
+    if (isAdmin && viewingEmployeeId && allGoals.length > 0) {
       filterGoalsByEmployee(viewingEmployeeId);
     }
   }, [viewingEmployeeId, allGoals]);
 
   const fetchAllEmployees = async () => {
-    const { data } = await supabase
-      .from('employees')
-      .select('id, first_name, last_name, email, role')
-      .order('first_name');
-    setEmployees(data || []);
-    if (data?.length > 0 && !viewingEmployeeId) {
-      setViewingEmployeeId(data[0].id);
+    try {
+      const { data } = await supabase
+        .from('employees')
+        .select('id, first_name, last_name, email, role')
+        .order('first_name');
+      setEmployees(data || []);
+      if (data?.length > 0 && !viewingEmployeeId) {
+        setViewingEmployeeId(data[0].id);
+      }
+    } catch (error) {
+      console.error('Error fetching employees:', error);
     }
   };
 
@@ -61,9 +65,9 @@ const GoalsList = () => {
       if (viewingEmployeeId) {
         filterGoalsByEmployee(viewingEmployeeId, data);
       }
+      setLoading(false);
     } catch (error) {
-      console.error('Error:', error);
-    } finally {
+      console.error('Error fetching all goals:', error);
       setLoading(false);
     }
   };
@@ -78,9 +82,9 @@ const GoalsList = () => {
         .eq('employee_id', empId)
         .order('due_date', { ascending: true });
       setGoals(data || []);
+      setLoading(false);
     } catch (error) {
-      console.error('Error:', error);
-    } finally {
+      console.error('Error fetching goals:', error);
       setLoading(false);
     }
   };
@@ -98,7 +102,7 @@ const GoalsList = () => {
         employee_id: targetEmployeeId,
         title: formData.title,
         description: formData.description,
-        due_date: formData.due_date,
+        due_date: formData.due_date || null,
         progress_percentage: parseInt(formData.progress_percentage) || 0,
         status: formData.status
       };
@@ -138,7 +142,7 @@ const GoalsList = () => {
         .update({ 
           progress_percentage: newProgress,
           status: newStatus,
-          completed_at: newProgress >= 100 ? new Date() : null
+          completed_at: newProgress >= 100 ? new Date().toISOString() : null
         })
         .eq('id', goalId);
       
@@ -156,7 +160,7 @@ const GoalsList = () => {
   };
 
   const handleDelete = async (goalId) => {
-    if (!confirm('¿Eliminar esta meta?')) return;
+    if (!confirm('¿Estás seguro de eliminar esta meta?')) return;
     
     try {
       const { error } = await supabase.from('goals').delete().eq('id', goalId);
@@ -203,19 +207,21 @@ const GoalsList = () => {
 
   const selectedEmployeeData = employees.find(e => e.id === viewingEmployeeId);
 
-  // Estadísticas del empleado seleccionado
   const stats = {
     total: goals.length,
     completed: goals.filter(g => g.status === 'completed' || g.progress_percentage >= 100).length,
     inProgress: goals.filter(g => g.status === 'in_progress' && g.progress_percentage < 100).length,
-    notStarted: goals.filter(g => g.status === 'not_started').length,
+    notStarted: goals.filter(g => g.status === 'not_started' || (g.progress_percentage === 0 && g.status !== 'completed')).length,
     avgProgress: goals.length > 0 ? Math.round(goals.reduce((sum, g) => sum + (g.progress_percentage || 0), 0) / goals.length) : 0
   };
 
   if (!employee?.id) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
+          <p className="mt-4 text-text-tertiary">Cargando perfil de usuario...</p>
+        </div>
       </div>
     );
   }
@@ -224,6 +230,7 @@ const GoalsList = () => {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
+        <p className="mt-4 text-text-tertiary">Cargando metas...</p>
       </div>
     );
   }
@@ -235,7 +242,7 @@ const GoalsList = () => {
         <div>
           <h1 className="text-2xl font-display font-bold text-white">Metas</h1>
           <p className="text-text-secondary mt-1">
-            {isAdmin ? 'Gestión de metas por empleado' : 'Seguimiento de metas profesionales'}
+            {isAdmin ? 'Gestión de metas por empleado' : 'Seguimiento de tus metas profesionales'}
           </p>
         </div>
         <button
@@ -335,7 +342,8 @@ const GoalsList = () => {
       {/* Lista de Metas */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {goals.map((goal) => {
-          const statusConfig = getStatusConfig(goal.status, goal.progress_percentage);
+          const percentage = goal.progress_percentage || 0;
+          const statusConfig = getStatusConfig(goal.status, percentage);
           const StatusIcon = statusConfig.icon;
           
           return (
@@ -362,7 +370,7 @@ const GoalsList = () => {
                     <StatusIcon className="w-3 h-3" />
                     {statusConfig.label}
                   </span>
-                  {/* Botones de acción - SOLO visibles para ADMIN o dueño de la meta */}
+                  {/* Botones de acción - SOLO visibles para ADMIN */}
                   {isAdmin && (
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
                       <button
@@ -384,31 +392,30 @@ const GoalsList = () => {
                 </div>
               </div>
               
-              <p className="text-text-secondary text-sm mb-4">{goal.description}</p>
+              <p className="text-text-secondary text-sm mb-4">{goal.description || 'Sin descripción'}</p>
               
               <div className="mt-4">
                 <div className="flex justify-between text-sm text-text-tertiary mb-2">
                   <span>Progreso</span>
                   <div className="flex items-center gap-2">
-                    <span>{goal.progress_percentage}%</span>
-                    {/* Control deslizante SOLO para el empleado dueño (o admin) */}
-                    {(!isAdmin || goal.employee_id === employee?.id) && (
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        step="5"
-                        value={goal.progress_percentage}
-                        onChange={(e) => handleUpdateProgress(goal.id, parseInt(e.target.value))}
-                        className="w-24 h-1 bg-surface-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
-                      />
-                    )}
+                    <span>{percentage}%</span>
+                    {/* Control deslizante - visible para todos */}
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="5"
+                      value={percentage}
+                      onChange={(e) => handleUpdateProgress(goal.id, parseInt(e.target.value))}
+                      className="w-24 h-1 bg-surface-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                      title="Actualizar progreso"
+                    />
                   </div>
                 </div>
                 <div className="w-full bg-surface-700 rounded-full h-2">
                   <div 
                     className="bg-primary-500 h-2 rounded-full transition-all duration-500"
-                    style={{ width: `${goal.progress_percentage}%` }}
+                    style={{ width: `${percentage}%` }}
                   />
                 </div>
               </div>
@@ -504,7 +511,7 @@ const GoalsList = () => {
                   max="100"
                   className="input"
                   value={formData.progress_percentage}
-                  onChange={(e) => setFormData({ ...formData, progress_percentage: parseInt(e.target.value) })}
+                  onChange={(e) => setFormData({ ...formData, progress_percentage: parseInt(e.target.value) || 0 })}
                 />
               </div>
               <div className="flex gap-3 pt-4">
