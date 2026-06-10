@@ -1,6 +1,6 @@
-// src/components/Leave/LeaveRequests.jsx
+// src/components/Leave/LeaveRequests.jsx (versión de prueba con logs)
 import React, { useState, useEffect } from 'react';
-import { Calendar, Plus, CheckCircle, XCircle, Clock, X, Users, Search, Filter, Eye } from 'lucide-react';
+import { Calendar, Plus, CheckCircle, XCircle, Clock, X, Users, Search } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import LeaveBalances from './LeaveBalances';
@@ -9,14 +9,12 @@ const LeaveRequests = () => {
   const { employee, isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState('requests');
   const [requests, setRequests] = useState([]);
-  const [allRequests, setAllRequests] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [policies, setPolicies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [viewingEmployeeId, setViewingEmployeeId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
   const [formData, setFormData] = useState({
     policy_id: '',
     start_date: '',
@@ -25,129 +23,147 @@ const LeaveRequests = () => {
   });
   const [submitting, setSubmitting] = useState(false);
 
-  // Si es admin, cargar todos los empleados y todas las solicitudes
+  // Log para verificar el estado del admin
+  console.log('isAdmin:', isAdmin);
+  console.log('employee:', employee);
+
   useEffect(() => {
     if (isAdmin) {
       fetchAllEmployees();
       fetchAllRequests();
       fetchPolicies();
-    } else {
-      setViewingEmployeeId(employee?.id);
+    } else if (employee?.id) {
+      setViewingEmployeeId(employee.id);
+      fetchRequests(employee.id);
+      fetchPolicies();
     }
   }, [isAdmin, employee]);
 
-  // Cargar solicitudes del empleado seleccionado
-  useEffect(() => {
-    if (viewingEmployeeId && !isAdmin) {
-      fetchRequests(viewingEmployeeId);
-    } else if (viewingEmployeeId && isAdmin) {
-      // Para admin, filtrar las solicitudes ya cargadas
-      filterRequestsByEmployee();
-    }
-  }, [viewingEmployeeId, isAdmin, allRequests]);
-
   const fetchAllEmployees = async () => {
-    const { data } = await supabase
+    console.log('Fetching all employees...');
+    const { data, error } = await supabase
       .from('employees')
       .select('id, first_name, last_name, email, role')
       .order('first_name');
-    setEmployees(data || []);
-    if (data?.length > 0 && !viewingEmployeeId) {
-      setViewingEmployeeId(data[0].id);
+    
+    if (error) {
+      console.error('Error fetching employees:', error);
+    } else {
+      console.log('Employees fetched:', data);
+      setEmployees(data || []);
+      if (data?.length > 0 && !viewingEmployeeId) {
+        setViewingEmployeeId(data[0].id);
+        // Después de seleccionar el primer empleado, cargar sus solicitudes
+        fetchRequests(data[0].id);
+      }
     }
   };
 
   const fetchAllRequests = async () => {
-    try {
-      const { data } = await supabase
-        .from('leave_requests')
-        .select('*, policy:leave_policies(name), employee:employees(first_name, last_name, email)')
-        .order('created_at', { ascending: false });
-      setAllRequests(data || []);
-      filterRequestsByEmployee(viewingEmployeeId, data);
-    } catch (error) {
-      console.error('Error:', error);
-    } finally {
+    console.log('Fetching all leave requests...');
+    const { data, error } = await supabase
+      .from('leave_requests')
+      .select('*, policy:leave_policies(name), employee:employees(first_name, last_name, email)')
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching all requests:', error);
+    } else {
+      console.log('All requests fetched:', data);
+      setRequests(data || []);
       setLoading(false);
-    }
-  };
-
-  const filterRequestsByEmployee = (empId = viewingEmployeeId, requestsData = allRequests) => {
-    if (empId && requestsData) {
-      const filtered = requestsData.filter(r => r.employee_id === empId);
-      setRequests(filtered);
     }
   };
 
   const fetchRequests = async (empId) => {
-    if (!empId) return;
-    setLoading(true);
-    try {
-      const { data } = await supabase
-        .from('leave_requests')
-        .select('*, policy:leave_policies(name)')
-        .eq('employee_id', empId)
-        .order('created_at', { ascending: false });
-      setRequests(data || []);
-    } catch (error) {
-      console.error('Error:', error);
-    } finally {
-      setLoading(false);
+    if (!empId) {
+      console.log('No employee ID provided');
+      return;
     }
+    
+    console.log('Fetching requests for employee:', empId);
+    setLoading(true);
+    
+    const { data, error } = await supabase
+      .from('leave_requests')
+      .select('*, policy:leave_policies(name)')
+      .eq('employee_id', empId)
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching requests:', error);
+    } else {
+      console.log('Requests fetched for employee:', data);
+      setRequests(data || []);
+    }
+    setLoading(false);
   };
 
   const fetchPolicies = async () => {
-    const { data } = await supabase.from('leave_policies').select('*');
-    setPolicies(data || []);
+    console.log('Fetching policies...');
+    const { data, error } = await supabase.from('leave_policies').select('*');
+    if (error) {
+      console.error('Error fetching policies:', error);
+    } else {
+      console.log('Policies fetched:', data);
+      setPolicies(data || []);
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
-    try {
-      const targetEmployeeId = isAdmin ? viewingEmployeeId : employee.id;
-      const { error } = await supabase.from('leave_requests').insert([{
-        employee_id: targetEmployeeId,
-        ...formData,
-        status: 'pending'
-      }]);
-      if (error) throw error;
+    
+    const targetEmployeeId = isAdmin ? viewingEmployeeId : employee?.id;
+    console.log('Creating request for employee:', targetEmployeeId);
+    
+    const newRequest = {
+      employee_id: targetEmployeeId,
+      ...formData,
+      status: 'pending'
+    };
+    console.log('New request data:', newRequest);
+    
+    const { data, error } = await supabase.from('leave_requests').insert([newRequest]).select();
+    
+    if (error) {
+      console.error('Error creating request:', error);
+      alert('Error al crear la solicitud: ' + error.message);
+    } else {
+      console.log('Request created:', data);
       setShowForm(false);
       setFormData({ policy_id: '', start_date: '', end_date: '', reason: '' });
       
-      if (isAdmin) {
-        await fetchAllRequests();
-      } else {
+      if (isAdmin && viewingEmployeeId) {
+        await fetchRequests(viewingEmployeeId);
+      } else if (employee?.id) {
         await fetchRequests(employee.id);
       }
-    } catch (error) {
-      console.error('Error:', error);
-      alert('Error al crear la solicitud');
-    } finally {
-      setSubmitting(false);
     }
+    setSubmitting(false);
   };
 
   const handleUpdateStatus = async (requestId, newStatus) => {
-    try {
-      const { error } = await supabase
-        .from('leave_requests')
-        .update({ 
-          status: newStatus,
-          approved_by: isAdmin ? employee.id : null,
-          approved_at: new Date()
-        })
-        .eq('id', requestId);
-      if (error) throw error;
-      
-      if (isAdmin) {
-        await fetchAllRequests();
-      } else {
+    console.log('Updating request:', requestId, 'to status:', newStatus);
+    const { error } = await supabase
+      .from('leave_requests')
+      .update({ 
+        status: newStatus,
+        approved_by: employee?.id,
+        approved_at: new Date()
+      })
+      .eq('id', requestId);
+    
+    if (error) {
+      console.error('Error updating status:', error);
+      alert('Error al actualizar la solicitud');
+    } else {
+      console.log('Status updated successfully');
+      if (isAdmin && viewingEmployeeId) {
+        await fetchRequests(viewingEmployeeId);
+      } else if (employee?.id) {
         await fetchRequests(employee.id);
       }
-    } catch (error) {
-      console.error('Error:', error);
-      alert('Error al actualizar la solicitud');
     }
   };
 
@@ -162,14 +178,6 @@ const LeaveRequests = () => {
     }
   };
 
-  const getStatusBadgeClass = (status) => {
-    switch (status) {
-      case 'approved': return 'bg-accent-600/20 text-accent-400 border-accent-500/30';
-      case 'rejected': return 'bg-red-600/20 text-red-400 border-red-500/30';
-      default: return 'bg-yellow-600/20 text-yellow-400 border-yellow-500/30';
-    }
-  };
-
   const filteredEmployees = employees.filter(emp =>
     `${emp.first_name} ${emp.last_name} ${emp.email}`
       .toLowerCase()
@@ -178,11 +186,6 @@ const LeaveRequests = () => {
 
   const selectedEmployeeData = employees.find(e => e.id === viewingEmployeeId);
 
-  // Filtrar solicitudes por estado
-  const filteredRequests = statusFilter === 'all' 
-    ? requests 
-    : requests.filter(r => r.status === statusFilter);
-
   const stats = {
     total: requests.length,
     pending: requests.filter(r => r.status === 'pending').length,
@@ -190,22 +193,15 @@ const LeaveRequests = () => {
     rejected: requests.filter(r => r.status === 'rejected').length
   };
 
-  // Estado de carga inicial
-  if (!employee?.id) {
+  // Estado de debug
+  if (loading && isAdmin) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-text-tertiary">Cargando perfil de usuario...</p>
+          <p className="mt-4 text-text-tertiary">Cargando solicitudes...</p>
+          <p className="text-xs text-text-tertiary mt-2">Debug: isAdmin={String(isAdmin)}</p>
         </div>
-      </div>
-    );
-  }
-
-  if (loading && !isAdmin) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
       </div>
     );
   }
@@ -261,13 +257,11 @@ const LeaveRequests = () => {
         </div>
       </div>
 
-      {/* Contenido de la pestaña de Saldos */}
       {activeTab === 'balances' && <LeaveBalances />}
 
-      {/* Contenido de la pestaña de Solicitudes */}
       {activeTab === 'requests' && (
         <>
-          {/* Vista de Administrador: Selector de Empleado */}
+          {/* Selector de empleado para admin */}
           {isAdmin && (
             <div className="bg-surface-800 rounded-xl border border-white/10 p-4">
               <div className="flex items-center justify-between flex-wrap gap-4">
@@ -289,7 +283,10 @@ const LeaveRequests = () => {
                   {filteredEmployees.map((emp) => (
                     <button
                       key={emp.id}
-                      onClick={() => setViewingEmployeeId(emp.id)}
+                      onClick={() => {
+                        setViewingEmployeeId(emp.id);
+                        fetchRequests(emp.id);
+                      }}
                       className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
                         viewingEmployeeId === emp.id
                           ? 'bg-primary-600 text-white'
@@ -305,7 +302,7 @@ const LeaveRequests = () => {
             </div>
           )}
 
-          {/* Información del Empleado Seleccionado */}
+          {/* Información del empleado seleccionado */}
           {isAdmin && selectedEmployeeData && (
             <div className="bg-surface-800/50 rounded-xl border border-white/10 p-4">
               <div className="flex items-center gap-3">
@@ -324,102 +321,30 @@ const LeaveRequests = () => {
             </div>
           )}
 
-          {/* Tarjetas de estadísticas */}
+          {/* Estadísticas */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-surface-800 rounded-xl border border-white/10 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-text-tertiary text-sm">Total Solicitudes</p>
-                  <p className="text-2xl font-bold text-white">{stats.total}</p>
-                </div>
-                <div className="p-2 bg-primary-600/10 rounded-lg">
-                  <Calendar className="w-4 h-4 text-primary-400" />
-                </div>
-              </div>
+              <p className="text-text-tertiary text-sm">Total Solicitudes</p>
+              <p className="text-2xl font-bold text-white">{stats.total}</p>
             </div>
             <div className="bg-surface-800 rounded-xl border border-white/10 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-text-tertiary text-sm">Aprobadas</p>
-                  <p className="text-2xl font-bold text-accent-400">{stats.approved}</p>
-                </div>
-                <div className="p-2 bg-accent-600/10 rounded-lg">
-                  <CheckCircle className="w-4 h-4 text-accent-400" />
-                </div>
-              </div>
+              <p className="text-text-tertiary text-sm">Aprobadas</p>
+              <p className="text-2xl font-bold text-accent-400">{stats.approved}</p>
             </div>
             <div className="bg-surface-800 rounded-xl border border-white/10 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-text-tertiary text-sm">Pendientes</p>
-                  <p className="text-2xl font-bold text-yellow-400">{stats.pending}</p>
-                </div>
-                <div className="p-2 bg-yellow-600/10 rounded-lg">
-                  <Clock className="w-4 h-4 text-yellow-400" />
-                </div>
-              </div>
+              <p className="text-text-tertiary text-sm">Pendientes</p>
+              <p className="text-2xl font-bold text-yellow-400">{stats.pending}</p>
             </div>
             <div className="bg-surface-800 rounded-xl border border-white/10 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-text-tertiary text-sm">Rechazadas</p>
-                  <p className="text-2xl font-bold text-red-400">{stats.rejected}</p>
-                </div>
-                <div className="p-2 bg-red-600/10 rounded-lg">
-                  <XCircle className="w-4 h-4 text-red-400" />
-                </div>
-              </div>
+              <p className="text-text-tertiary text-sm">Rechazadas</p>
+              <p className="text-2xl font-bold text-red-400">{stats.rejected}</p>
             </div>
-          </div>
-
-          {/* Filtro por estado */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => setStatusFilter('all')}
-              className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                statusFilter === 'all'
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-surface-700 text-text-tertiary hover:bg-surface-600'
-              }`}
-            >
-              Todos
-            </button>
-            <button
-              onClick={() => setStatusFilter('pending')}
-              className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                statusFilter === 'pending'
-                  ? 'bg-yellow-600 text-white'
-                  : 'bg-surface-700 text-text-tertiary hover:bg-surface-600'
-              }`}
-            >
-              Pendientes
-            </button>
-            <button
-              onClick={() => setStatusFilter('approved')}
-              className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                statusFilter === 'approved'
-                  ? 'bg-accent-600 text-white'
-                  : 'bg-surface-700 text-text-tertiary hover:bg-surface-600'
-              }`}
-            >
-              Aprobadas
-            </button>
-            <button
-              onClick={() => setStatusFilter('rejected')}
-              className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                statusFilter === 'rejected'
-                  ? 'bg-red-600 text-white'
-                  : 'bg-surface-700 text-text-tertiary hover:bg-surface-600'
-              }`}
-            >
-              Rechazadas
-            </button>
           </div>
 
           {/* Lista de solicitudes */}
           <div className="bg-surface-800 rounded-xl border border-white/10 overflow-hidden">
             <div className="divide-y divide-white/10">
-              {filteredRequests.map((request) => {
+              {requests.map((request) => {
                 const StatusIcon = getStatusConfig(request.status).icon;
                 const statusConfig = getStatusConfig(request.status);
                 const days = Math.ceil((new Date(request.end_date) - new Date(request.start_date)) / (1000 * 60 * 60 * 24)) + 1;
@@ -435,14 +360,7 @@ const LeaveRequests = () => {
                         <p className="text-sm text-text-tertiary">
                           {new Date(request.start_date).toLocaleDateString()} - {new Date(request.end_date).toLocaleDateString()}
                         </p>
-                        <p className="text-xs text-text-tertiary mt-1">
-                          {days} día{days !== 1 ? 's' : ''}
-                        </p>
-                        {isAdmin && request.employee && (
-                          <p className="text-xs text-primary-400 mt-1">
-                            Empleado: {request.employee.first_name} {request.employee.last_name}
-                          </p>
-                        )}
+                        <p className="text-xs text-text-tertiary mt-1">{days} días</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -451,7 +369,6 @@ const LeaveRequests = () => {
                         {statusConfig.label}
                       </span>
                       
-                      {/* Botones de acción solo para admin en solicitudes pendientes */}
                       {isAdmin && request.status === 'pending' && (
                         <div className="flex gap-2">
                           <button
@@ -474,10 +391,10 @@ const LeaveRequests = () => {
               })}
             </div>
 
-            {filteredRequests.length === 0 && (
+            {requests.length === 0 && !loading && (
               <div className="text-center py-12">
                 <Calendar className="w-16 h-16 text-surface-600 mx-auto mb-4" />
-                <p className="text-text-tertiary">No hay solicitudes de ausencia</p>
+                <p className="text-text-tertiary">No hay solicitudes de ausencia para este empleado</p>
                 <button
                   onClick={() => setShowForm(true)}
                   className="mt-4 text-primary-400 hover:text-primary-300 text-sm"
@@ -496,10 +413,7 @@ const LeaveRequests = () => {
           <div className="bg-surface-800 rounded-2xl w-full max-w-md">
             <div className="flex justify-between items-center p-6 border-b border-white/10">
               <h2 className="text-xl font-display font-bold text-white">Nueva Solicitud</h2>
-              <button
-                onClick={() => setShowForm(false)}
-                className="text-text-tertiary hover:text-white transition"
-              >
+              <button onClick={() => setShowForm(false)} className="text-text-tertiary hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -553,18 +467,10 @@ const LeaveRequests = () => {
                 />
               </div>
               <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="flex-1 btn-secondary"
-                >
+                <button type="button" onClick={() => setShowForm(false)} className="flex-1 btn-secondary">
                   Cancelar
                 </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="flex-1 btn-primary disabled:opacity-50"
-                >
+                <button type="submit" disabled={submitting} className="flex-1 btn-primary">
                   {submitting ? 'Enviando...' : 'Enviar Solicitud'}
                 </button>
               </div>
