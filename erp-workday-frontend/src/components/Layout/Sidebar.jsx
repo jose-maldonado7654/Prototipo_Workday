@@ -18,7 +18,7 @@ const Sidebar = ({ collapsed, setCollapsed }) => {
     { path: '/onboarding', icon: ClipboardList, label: 'Onboarding' },
     { path: '/time-tracking', icon: Clock, label: 'Tiempo' },
     { path: '/leave', icon: CalendarOff, label: 'Ausencias' },
-    { path: '/talent', icon: Star, label: 'Talento' },
+    { path: '/talent', icon: Star, label: 'Metas' },
     { path: '/compensation', icon: DollarSign, label: 'Compensaciones' },
     { path: '/expenses', icon: Receipt, label: 'Gastos' },
     { path: '/self-service', icon: UserCircle, label: 'Autoservicio' },

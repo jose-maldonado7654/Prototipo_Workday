@@ -84,7 +84,7 @@ const LeaveBalances = () => {
       {/* Header */}
       <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
-          <h2 className="text-xl font-display font-semibold text-white">Mis Saldos</h2>
+          <h2 className="text-xl font-display font-semibold text-white mb-4">Disponibilidad</h2>
           <p className="text-text-tertiary text-sm mt-1">
             Días disponibles por tipo de ausencia
           </p>
