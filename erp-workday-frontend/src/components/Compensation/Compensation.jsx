@@ -1,6 +1,6 @@
 // src/components/Compensation/Compensation.jsx
 import React, { useState, useEffect } from 'react';
-import { DollarSign, Plus, TrendingUp, Calendar, Award, X, Users, Search } from 'lucide-react';
+import { DollarSign, Plus, TrendingUp, Calendar, Award, X, Users, Search, Eye } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 
@@ -13,36 +13,46 @@ const Compensation = () => {
   const [loading, setLoading] = useState(true);
   const [showSalaryForm, setShowSalaryForm] = useState(false);
   const [showBonusForm, setShowBonusForm] = useState(false);
-  const [selectedEmployee, setSelectedEmployee] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
-
-  // Si es admin, puede seleccionar empleado; si no, usa su propio ID
   const [viewingEmployeeId, setViewingEmployeeId] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [salaryForm, setSalaryForm] = useState({
+    employee_id: '',
+    amount: '',
+    currency: 'USD',
+    effective_from: ''
+  });
+  const [bonusForm, setBonusForm] = useState({
+    employee_id: '',
+    amount: '',
+    bonus_type: '',
+    payment_date: '',
+    notes: ''
+  });
 
   useEffect(() => {
     if (isAdmin) {
-      fetchEmployees();
+      fetchAllEmployees();
       fetchCompensationPlans();
-      // Por defecto, mostrar el primer empleado o el admin
-      if (employees.length > 0 && !viewingEmployeeId) {
-        setViewingEmployeeId(employees[0]?.id);
+      if (viewingEmployeeId) {
+        fetchEmployeeCompensation(viewingEmployeeId);
       }
-    } else {
-      setViewingEmployeeId(employee?.id);
-      fetchEmployeeData(employee?.id);
+    } else if (employee?.id) {
+      setViewingEmployeeId(employee.id);
+      fetchEmployeeCompensation(employee.id);
     }
   }, [isAdmin, employee]);
 
   useEffect(() => {
     if (isAdmin && viewingEmployeeId) {
-      fetchEmployeeData(viewingEmployeeId);
+      fetchEmployeeCompensation(viewingEmployeeId);
     }
-  }, [viewingEmployeeId, isAdmin]);
+  }, [viewingEmployeeId]);
 
-  const fetchEmployees = async () => {
+  const fetchAllEmployees = async () => {
     const { data } = await supabase
       .from('employees')
-      .select('id, first_name, last_name, email, role');
+      .select('id, first_name, last_name, email, role')
+      .order('first_name');
     setEmployees(data || []);
     if (data?.length > 0 && !viewingEmployeeId) {
       setViewingEmployeeId(data[0].id);
@@ -54,7 +64,7 @@ const Compensation = () => {
     setCompensationPlans(data || []);
   };
 
-  const fetchEmployeeData = async (empId) => {
+  const fetchEmployeeCompensation = async (empId) => {
     if (!empId) return;
     setLoading(true);
     
@@ -84,30 +94,21 @@ const Compensation = () => {
   const handleAddSalary = async (e) => {
     e.preventDefault();
     try {
-      const form = e.target;
-      const employee_id = form.employee_id.value;
-      const amount = parseFloat(form.amount.value);
-      const currency = form.currency.value;
-      const effective_from = form.effective_from.value;
-      
-      // Cerrar registro anterior
+      // Cerrar registro anterior del empleado
       await supabase
         .from('salary_history')
         .update({ effective_to: new Date() })
-        .eq('employee_id', employee_id)
+        .eq('employee_id', salaryForm.employee_id)
         .is('effective_to', null);
       
-      // Insertar nuevo salario
       await supabase.from('salary_history').insert([{
-        employee_id,
-        amount,
-        currency,
-        effective_from,
-        compensation_plan_id: compensationPlans[0]?.id
+        ...salaryForm,
+        amount: parseFloat(salaryForm.amount)
       }]);
       
       setShowSalaryForm(false);
-      fetchEmployeeData(viewingEmployeeId || employee_id);
+      setSalaryForm({ employee_id: '', amount: '', currency: 'USD', effective_from: '' });
+      fetchEmployeeCompensation(viewingEmployeeId);
     } catch (error) {
       console.error('Error:', error);
       alert('Error al registrar salario');
@@ -117,23 +118,14 @@ const Compensation = () => {
   const handleAddBonus = async (e) => {
     e.preventDefault();
     try {
-      const form = e.target;
-      const employee_id = form.employee_id.value;
-      const amount = parseFloat(form.amount.value);
-      const bonus_type = form.bonus_type.value;
-      const payment_date = form.payment_date.value;
-      const notes = form.notes.value;
-      
       await supabase.from('bonus_payments').insert([{
-        employee_id,
-        amount,
-        bonus_type,
-        payment_date,
-        notes
+        ...bonusForm,
+        amount: parseFloat(bonusForm.amount)
       }]);
       
       setShowBonusForm(false);
-      fetchEmployeeData(viewingEmployeeId || employee_id);
+      setBonusForm({ employee_id: '', amount: '', bonus_type: '', payment_date: '', notes: '' });
+      fetchEmployeeCompensation(viewingEmployeeId);
     } catch (error) {
       console.error('Error:', error);
       alert('Error al registrar bono');
@@ -161,7 +153,7 @@ const Compensation = () => {
 
   const selectedEmployeeData = employees.find(e => e.id === viewingEmployeeId);
 
-  if (loading && !isAdmin) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
@@ -175,27 +167,32 @@ const Compensation = () => {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-display font-bold text-white">Compensaciones</h1>
-          <p className="text-text-secondary mt-1">Gestión de salarios y bonos</p>
+          <p className="text-text-secondary mt-1">
+            {isAdmin ? 'Gestión de salarios y bonos' : 'Tu información salarial'}
+          </p>
         </div>
-        <div className="flex gap-3">
-          <button
-            onClick={() => setShowBonusForm(true)}
-            className="btn-secondary flex items-center gap-2"
-          >
-            <Award className="w-4 h-4" />
-            Registrar Bono
-          </button>
-          <button
-            onClick={() => setShowSalaryForm(true)}
-            className="btn-primary flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            Nuevo Salario
-          </button>
-        </div>
+        {/* Botones SOLO visibles para ADMIN */}
+        {isAdmin && (
+          <div className="flex gap-3">
+            <button
+              onClick={() => setShowBonusForm(true)}
+              className="btn-secondary flex items-center gap-2"
+            >
+              <Award className="w-4 h-4" />
+              Registrar Bono
+            </button>
+            <button
+              onClick={() => setShowSalaryForm(true)}
+              className="btn-primary flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Nuevo Salario
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Vista de Administrador: Selector de Empleado */}
+      {/* Selector de Empleado - SOLO visible para ADMIN */}
       {isAdmin && (
         <div className="bg-surface-800 rounded-xl border border-white/10 p-4">
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -213,7 +210,7 @@ const Compensation = () => {
                 />
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
               {filteredEmployees.map((emp) => (
                 <button
                   key={emp.id}
@@ -233,7 +230,7 @@ const Compensation = () => {
         </div>
       )}
 
-      {/* Información del Empleado Seleccionado */}
+      {/* Información del Empleado Seleccionado - SOLO visible para ADMIN */}
       {isAdmin && selectedEmployeeData && (
         <div className="bg-surface-800/50 rounded-xl border border-white/10 p-4">
           <div className="flex items-center gap-3">
@@ -247,9 +244,6 @@ const Compensation = () => {
                 {selectedEmployeeData.first_name} {selectedEmployeeData.last_name}
               </h2>
               <p className="text-text-tertiary text-sm">{selectedEmployeeData.email}</p>
-              <p className="text-text-tertiary text-xs mt-1">
-                Rol: {selectedEmployeeData.role === 'admin' ? 'Administrador' : 'Empleado'}
-              </p>
             </div>
           </div>
         </div>
@@ -320,7 +314,7 @@ const Compensation = () => {
                       <span className="px-2 py-1 bg-surface-600 text-text-tertiary rounded-full text-xs">Histórico</span>
                     )}
                    </td>
-                 </tr>
+                </tr>
               ))}
               {salaryHistory.length === 0 && (
                 <tr>
@@ -361,14 +355,14 @@ const Compensation = () => {
           {bonusHistory.length === 0 && (
             <div className="p-8 text-center">
               <Award className="w-12 h-12 text-surface-600 mx-auto mb-3" />
-              <p className="text-text-tertiary">No hay bonos registrados para este empleado</p>
+              <p className="text-text-tertiary">No hay bonos registrados</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Modal Nuevo Salario */}
-      {showSalaryForm && (
+      {/* Modal Nuevo Salario - SOLO visible para ADMIN */}
+      {showSalaryForm && isAdmin && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-surface-800 rounded-2xl w-full max-w-md">
             <div className="flex justify-between items-center p-6 border-b border-white/10">
@@ -381,16 +375,14 @@ const Compensation = () => {
               <div>
                 <label className="label">Empleado</label>
                 <select
-                  name="employee_id"
                   required
                   className="input"
-                  defaultValue={viewingEmployeeId || ''}
+                  value={salaryForm.employee_id}
+                  onChange={(e) => setSalaryForm({ ...salaryForm, employee_id: e.target.value })}
                 >
                   <option value="">Seleccionar...</option>
                   {employees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.first_name} {emp.last_name} ({emp.email})
-                    </option>
+                    <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>
                   ))}
                 </select>
               </div>
@@ -398,20 +390,24 @@ const Compensation = () => {
                 <label className="label">Monto</label>
                 <input
                   type="number"
-                  name="amount"
                   step="0.01"
                   required
                   className="input"
                   placeholder="0.00"
+                  value={salaryForm.amount}
+                  onChange={(e) => setSalaryForm({ ...salaryForm, amount: e.target.value })}
                 />
               </div>
               <div>
                 <label className="label">Moneda</label>
-                <select name="currency" className="input" defaultValue="USD">
+                <select
+                  className="input"
+                  value={salaryForm.currency}
+                  onChange={(e) => setSalaryForm({ ...salaryForm, currency: e.target.value })}
+                >
                   <option value="USD">USD - Dólar Americano</option>
                   <option value="MXN">MXN - Peso Mexicano</option>
                   <option value="COP">COP - Peso Colombiano</option>
-                  <option value="CLP">CLP - Peso Chileno</option>
                   <option value="EUR">EUR - Euro</option>
                 </select>
               </div>
@@ -419,9 +415,10 @@ const Compensation = () => {
                 <label className="label">Fecha Efectiva</label>
                 <input
                   type="date"
-                  name="effective_from"
                   required
                   className="input"
+                  value={salaryForm.effective_from}
+                  onChange={(e) => setSalaryForm({ ...salaryForm, effective_from: e.target.value })}
                 />
               </div>
               <div className="flex gap-3 pt-4">
@@ -437,8 +434,8 @@ const Compensation = () => {
         </div>
       )}
 
-      {/* Modal Nuevo Bono */}
-      {showBonusForm && (
+      {/* Modal Nuevo Bono - SOLO visible para ADMIN */}
+      {showBonusForm && isAdmin && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-surface-800 rounded-2xl w-full max-w-md">
             <div className="flex justify-between items-center p-6 border-b border-white/10">
@@ -451,16 +448,14 @@ const Compensation = () => {
               <div>
                 <label className="label">Empleado</label>
                 <select
-                  name="employee_id"
                   required
                   className="input"
-                  defaultValue={viewingEmployeeId || ''}
+                  value={bonusForm.employee_id}
+                  onChange={(e) => setBonusForm({ ...bonusForm, employee_id: e.target.value })}
                 >
                   <option value="">Seleccionar...</option>
                   {employees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.first_name} {emp.last_name} ({emp.email})
-                    </option>
+                    <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>
                   ))}
                 </select>
               </div>
@@ -468,16 +463,22 @@ const Compensation = () => {
                 <label className="label">Monto</label>
                 <input
                   type="number"
-                  name="amount"
                   step="0.01"
                   required
                   className="input"
                   placeholder="0.00"
+                  value={bonusForm.amount}
+                  onChange={(e) => setBonusForm({ ...bonusForm, amount: e.target.value })}
                 />
               </div>
               <div>
                 <label className="label">Tipo de Bono</label>
-                <select name="bonus_type" required className="input">
+                <select
+                  required
+                  className="input"
+                  value={bonusForm.bonus_type}
+                  onChange={(e) => setBonusForm({ ...bonusForm, bonus_type: e.target.value })}
+                >
                   <option value="">Seleccionar...</option>
                   <option value="performance">🎯 Rendimiento</option>
                   <option value="holiday">🎄 Aguinaldo</option>
@@ -489,18 +490,20 @@ const Compensation = () => {
                 <label className="label">Fecha de Pago</label>
                 <input
                   type="date"
-                  name="payment_date"
                   required
                   className="input"
+                  value={bonusForm.payment_date}
+                  onChange={(e) => setBonusForm({ ...bonusForm, payment_date: e.target.value })}
                 />
               </div>
               <div>
                 <label className="label">Notas / Motivo</label>
                 <textarea
-                  name="notes"
-                  rows="2"
                   className="input"
+                  rows="2"
                   placeholder="Ej: Bono trimestral por cumplimiento de metas..."
+                  value={bonusForm.notes}
+                  onChange={(e) => setBonusForm({ ...bonusForm, notes: e.target.value })}
                 />
               </div>
               <div className="flex gap-3 pt-4">
