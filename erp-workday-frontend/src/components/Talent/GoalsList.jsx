@@ -7,7 +7,6 @@ import { useAuth } from '../../context/AuthContext';
 const GoalsList = () => {
   const { employee, isAdmin } = useAuth();
   const [goals, setGoals] = useState([]);
-  const [allGoals, setAllGoals] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -27,18 +26,18 @@ const GoalsList = () => {
   useEffect(() => {
     if (isAdmin) {
       fetchAllEmployees();
-      fetchAllGoals();
     } else if (employee?.id) {
       setViewingEmployeeId(employee.id);
       fetchGoals(employee.id);
     }
   }, [isAdmin, employee]);
 
+  // Cuando cambia el empleado seleccionado (admin), cargar sus metas
   useEffect(() => {
-    if (isAdmin && viewingEmployeeId && allGoals.length > 0) {
-      filterGoalsByEmployee(viewingEmployeeId);
+    if (isAdmin && viewingEmployeeId) {
+      fetchGoals(viewingEmployeeId);
     }
-  }, [viewingEmployeeId, allGoals]);
+  }, [viewingEmployeeId, isAdmin]);
 
   const fetchAllEmployees = async () => {
     try {
@@ -55,43 +54,25 @@ const GoalsList = () => {
     }
   };
 
-  const fetchAllGoals = async () => {
-    try {
-      const { data } = await supabase
-        .from('goals')
-        .select('*, employee:employees(id, first_name, last_name, email)')
-        .order('due_date', { ascending: true });
-      setAllGoals(data || []);
-      if (viewingEmployeeId) {
-        filterGoalsByEmployee(viewingEmployeeId, data);
-      }
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching all goals:', error);
-      setLoading(false);
-    }
-  };
-
   const fetchGoals = async (empId) => {
     if (!empId) return;
     setLoading(true);
     try {
-      const { data } = await supabase
+      // Traer metas del empleado seleccionado
+      const { data, error } = await supabase
         .from('goals')
         .select('*')
         .eq('employee_id', empId)
         .order('due_date', { ascending: true });
+      
+      if (error) throw error;
+      console.log('Metas cargadas para empleado:', empId, data);
       setGoals(data || []);
-      setLoading(false);
     } catch (error) {
       console.error('Error fetching goals:', error);
+    } finally {
       setLoading(false);
     }
-  };
-
-  const filterGoalsByEmployee = (empId, goalsData = allGoals) => {
-    const filtered = (goalsData || []).filter(g => g.employee_id === empId);
-    setGoals(filtered);
   };
 
   const handleSubmit = async (e) => {
@@ -122,9 +103,10 @@ const GoalsList = () => {
       setEditingGoal(null);
       setFormData({ employee_id: '', title: '', description: '', due_date: '', progress_percentage: 0, status: 'not_started' });
       
-      if (isAdmin) {
-        await fetchAllGoals();
-      } else {
+      // Recargar metas del empleado actual
+      if (isAdmin && viewingEmployeeId) {
+        await fetchGoals(viewingEmployeeId);
+      } else if (employee?.id) {
         await fetchGoals(employee.id);
       }
     } catch (error) {
@@ -148,9 +130,9 @@ const GoalsList = () => {
       
       if (error) throw error;
       
-      if (isAdmin) {
-        await fetchAllGoals();
-      } else {
+      if (isAdmin && viewingEmployeeId) {
+        await fetchGoals(viewingEmployeeId);
+      } else if (employee?.id) {
         await fetchGoals(employee.id);
       }
     } catch (error) {
@@ -166,9 +148,9 @@ const GoalsList = () => {
       const { error } = await supabase.from('goals').delete().eq('id', goalId);
       if (error) throw error;
       
-      if (isAdmin) {
-        await fetchAllGoals();
-      } else {
+      if (isAdmin && viewingEmployeeId) {
+        await fetchGoals(viewingEmployeeId);
+      } else if (employee?.id) {
         await fetchGoals(employee.id);
       }
     } catch (error) {
@@ -226,7 +208,7 @@ const GoalsList = () => {
     );
   }
 
-  if (loading && !isAdmin) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
@@ -358,11 +340,6 @@ const GoalsList = () => {
                     <p className="text-sm text-text-tertiary">
                       Vence: {goal.due_date ? new Date(goal.due_date).toLocaleDateString() : 'Sin fecha límite'}
                     </p>
-                    {isAdmin && goal.employee && (
-                      <p className="text-xs text-primary-400 mt-1">
-                        Empleado: {goal.employee.first_name} {goal.employee.last_name}
-                      </p>
-                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -399,7 +376,6 @@ const GoalsList = () => {
                   <span>Progreso</span>
                   <div className="flex items-center gap-2">
                     <span>{percentage}%</span>
-                    {/* Control deslizante - visible para todos */}
                     <input
                       type="range"
                       min="0"
@@ -427,17 +403,19 @@ const GoalsList = () => {
       {goals.length === 0 && (
         <div className="text-center py-12 bg-surface-800 rounded-xl border border-white/10">
           <Target className="w-16 h-16 text-surface-600 mx-auto mb-4" />
-          <p className="text-text-tertiary">No hay metas registradas</p>
-          <button
-            onClick={() => {
-              setEditingGoal(null);
-              setFormData({ employee_id: isAdmin ? viewingEmployeeId || '' : employee.id, title: '', description: '', due_date: '', progress_percentage: 0, status: 'not_started' });
-              setShowForm(true);
-            }}
-            className="mt-4 text-primary-400 hover:text-primary-300"
-          >
-            Crear primera meta
-          </button>
+          <p className="text-text-tertiary">No hay metas registradas para este empleado</p>
+          {isAdmin && (
+            <button
+              onClick={() => {
+                setEditingGoal(null);
+                setFormData({ employee_id: viewingEmployeeId || '', title: '', description: '', due_date: '', progress_percentage: 0, status: 'not_started' });
+                setShowForm(true);
+              }}
+              className="mt-4 text-primary-400 hover:text-primary-300"
+            >
+              Crear meta para este empleado
+            </button>
+          )}
         </div>
       )}
 
